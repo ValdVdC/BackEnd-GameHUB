@@ -367,9 +367,18 @@ const axiosRetry = require('axios-retry').default;
 
 const app = express();
 
+const allowedOrigins = ['http://localhost:4200', 'https://front-end-game-hub.vercel.app'];
+
 app.use(cors({
-    origin: 'http://localhost:4200'
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
 }));
+
 app.use(express.json());
 
 const API_URL = 'https://api.igdb.com/v4/';
