@@ -445,7 +445,7 @@ async function fetchGenres(genreIds) {
 async function fetchVideos(videoIds) {
     const videosQuery = `fields video_id; where id = (${videoIds.join(',')});`;
     const response = await axios.post(API_URL + 'game_videos', videosQuery, { headers });
-    return response.data.map(video => `http://youtube.com/embed/${video.video_id}`);
+    return response.data.map(video => `https://youtube.com/embed/${video.video_id}`);
 }
 
 async function fetchReleaseDate(gameId) {
