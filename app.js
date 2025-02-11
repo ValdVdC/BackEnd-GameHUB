@@ -1,363 +1,3 @@
-// const express = require('express');
-// const axios = require('axios')
-// const cors = require('cors')
-// const NodeCache = require('node-cache');
-// require('dotenv').config()
-// const app = express();
-
-// app.use(cors({
-//     origin: 'http://localhost:4200'
-// }))
-// app.use(express.json());
-
-// const API_URL = 'https://api.igdb.com/v4/'
-
-// const CLIENT_ID = process.env.CLIENT_ID;
-// const AUTH_TOKEN = process.env.AUTH_TOKEN;
-
-// const headers = {
-//     'Client-ID': CLIENT_ID,
-//     'Authorization': `Bearer ${AUTH_TOKEN}`,
-//     'Content-Type': 'text/plain'
-// };
-
-// app.get('/api/games', async (req,res)=>{
-//     try {
-//         const popularQuery = `
-//         fields game_id,value,popularity_type; 
-//         sort value desc; 
-//         limit 9; 
-//         where  popularity_type = 3;
-//         `
-//         const popularGames = await axios.post(
-//             API_URL+'popularity_primitives',
-//             popularQuery ,
-//             { headers }
-//         )
-
-//         const gameIds = popularGames.data.map(game=>game.game_id)
-
-//         const gamesQuery = `
-//         fields name, genres, total_rating, cover, url; 
-//         where id = (${gameIds.join(',')}); 
-//         limit 9;
-//         `;
-        
-//         const games = await axios.post(
-//             API_URL+'games',
-//             gamesQuery,
-//             { headers }
-//         );
-//         const coverIds = games.data
-//         .map(game => game.cover)
-//         .filter(cover => cover); 
-
-//         const coversQuery = `fields image_id; 
-//         where id = (${coverIds.join(',')});`;
-
-//         const covers = await axios.post(
-//             API_URL+'covers',
-//             coversQuery,
-//             { headers }
-//         );
-
-//         const coverMap = {};
-//         covers.data.forEach(cover => {
-//             coverMap[cover.id] = `https://images.igdb.com/igdb/image/upload/t_1080p/${cover.image_id}.jpg`;
-//         });
-
-//         const allGenreIds = games.data
-//             .flatMap(game => game.genres || []);
-
-//         const uniqueGenreIds = Array.from(new Set(allGenreIds));
-
-//         const genresQuery = `
-//         fields name; 
-//         where id = (${uniqueGenreIds.join(',')}); 
-//         limit ${uniqueGenreIds.length};
-//         `;
-
-//         const genres = await axios.post(
-//             API_URL+'genres',
-//             genresQuery,
-//             { headers }
-//         );
-
-//         const genreMap = {};
-//         genres.data.forEach(genre => {
-//             genreMap[genre.id] = genre.name;
-//         });
-//         const gamesDetails = games.data.map(game => ({
-//             ...game,
-//             genres: game.genres ? game.genres.map(genreId => genreMap[genreId]) : [],
-//             cover_url: game.cover ? coverMap[game.cover] : null
-//         }));
-
-//         res.status(200).json(gamesDetails);
-
-//     } catch (error) {
-//         console.error('Erro ao buscar dados: ', error.messsage)
-//         res.status(500).json({error:'Erro ao buscar dados IGDB'})
-//     }
-// })
-
-// app.get('/api/game/:id',async(req,res)=>{
-//     const game = req.params.id
-//     let gameQuery;
-//     let gameId;
-//     //Detalhes dos jogos
-//     if (!isNaN(Number(game))) {
-//         gameQuery = `
-//         fields name, genres, cover, storyline, summary, url, total_rating, platforms, videos, themes; 
-//         where id = (${game}); 
-//         `;
-//     } 
-//     //Buscador do header
-//     else {
-//         gameQuery = `
-//         fields name, genres, cover, storyline, summary, url, total_rating, platforms, videos, themes;
-//         sort total_rating desc;
-//         where (name ~ "${game}"*)|(name ~ *"${game}")|(name ~ *"${game}"*);
-//         `;
-//     }
-//     try {
-//         // Consulta principal dos jogos
-//         const games = await axios.post(
-//             API_URL+'games',
-//             gameQuery,
-//             { headers }
-//         )
-//         gameId = games.data[0].id;
-        
-//         // Consulta dos covers
-//         const coverIds = games.data
-//         .map(game => game.cover)
-//         .filter(cover => cover); 
-//         const coversQuery = `
-//         fields image_id; 
-//         where id = (${coverIds.join(',')});
-//         `;
-        
-//         const covers = await axios.post(
-//             API_URL+'covers',
-//             coversQuery,
-//             { headers }
-//         );
-
-        
-//         const coverMap = {};
-        
-//         covers.data.forEach(cover => {
-//             coverMap[cover.id] = `https://images.igdb.com/igdb/image/upload/t_1080p/${cover.image_id}.jpg`;
-//         });
-
-//         // Consulta dos videos
-//         const videoIds = games.data
-//         .flatMap(game => game.videos || [])
-
-//         const videosQuery = `
-//         fields video_id;
-//         where id = (${videoIds.join(',')});
-//         `
-//         const videos = await axios.post(
-//             API_URL+'game_videos',
-//             videosQuery,
-//             { headers }
-//         );
-
-//         const videoMap = {}
-//         videos.data.forEach(video => {
-//             videoMap[video.id] = `http://youtube.com/embed/${video.video_id}`
-//         })
-
-//         // // Consulta dos temas
-//         // const themeIds = games.data
-//         // .flatMap(game => game.themes ||[])
-
-//         // const themesQuery = `
-//         // fields name, url;
-//         // where id = (${themeIds.join(',')});
-//         // `
-
-//         // const themes = await axios.post(
-//         //     API_URL+'themes',
-//         //     themesQuery,
-//         //     { headers }
-//         // )
-
-//         // const themeMap = {}
-//         // themes.data.forEach(theme =>{
-//         //     themeMap[theme.id] = theme.url
-//         // })
-//         // Consulta do lançamento
-//         const releaseDateQuery = `
-//         fields human, date; 
-//         where game = ${gameId}; 
-//         sort date asc; 
-//         limit 1;    
-//         `
-//         const releaseDate = await axios.post(
-//             API_URL+'release_dates',
-//             releaseDateQuery, 
-//             { headers }
-//         )
-//         //Consulta de plataformas
-        
-//         const allPlatformIds = games.data
-//         .flatMap(game=>game.platforms||[])
-
-//         const uniquePlatformIds = Array.from(new Set(allPlatformIds))
-
-//         const platformsQuery = `
-//         fields platform_logo;
-//         where id = (${uniquePlatformIds.join(',')});
-//         `
-//         const platforms = await axios.post(
-//             API_URL+'platforms',
-//             platformsQuery,
-//             { headers }
-//         )
-//         const platformMap = {}
-//         platforms.data.forEach(platform => {
-//             platformMap[platform.id] = platform.platform_logo;
-//         });
-
-//         const platformLogoIds = platforms.data
-//             .map(platform=>platform.platform_logo)
-//             .filter(id=>id)
-
-//         const platformsLogoQuery = `
-//         fields image_id,url;
-//         where id = (${platformLogoIds.join(',')});
-//         `
-
-//         const platformsLogo = await axios.post(
-//             API_URL+'platform_logos',
-//             platformsLogoQuery,
-//             { headers }
-//         )
-
-//         const platformLogoMap = {};
-
-//         platformsLogo.data.forEach(platform =>{
-//             platformLogoMap[platform.id] = `https://images.igdb.com/igdb/image/upload/t_thumb/${platform.image_id}.jpg`;
-//         })
-
-//         //Consulta dos gêneros
-//         const allGenreIds = games.data
-//             .flatMap(game => game.genres || []);
-
-//         const uniqueGenreIds = Array.from(new Set(allGenreIds));
-
-//         const genresQuery = `
-//         fields name; 
-//         where id = (${uniqueGenreIds.join(',')}); 
-//         limit ${uniqueGenreIds.length};
-//         `;
-
-//         const genres = await axios.post(
-//             API_URL+'genres',
-//             genresQuery,
-//             { headers }
-//         );
-
-//         const genreMap = {};
-//         genres.data.forEach(genre => {
-//             genreMap[genre.id] = genre.name;
-//         });
-
-//         // Juntar os detalhes dos jogos
-//         const gameDetails = games.data.map(game => ({
-//             ...game,
-//             genres: game.genres ? game.genres.map(genreId => genreMap[genreId]) : [],
-
-//             cover_url: game.cover ? coverMap[game.cover] : null,
-
-//             video_url: game.videos ? game.videos.map(videoId => videoMap[videoId]): [],
-
-//             // theme_url: game.themes ? game.themes.map(themeId => themeMap[themeId]):[],
-            
-//             release_date: releaseDate.data? releaseDate.data[0].human : null,
-
-//             platforms_logo: game.platforms ? game.platforms.map(platformId => platformLogoMap[platformMap[platformId]]) : [],
-
-//         }));
-
-//         res.status(200).json(gameDetails)
-//     } catch (error) {
-//         console.error('Erro ao buscar dados: ', error.messsage)
-//         res.status(500).json({error:'Erro ao buscar dados IGDB'})
-//     }
-// })
-
-// //Jogos por categoria 
-
-// const processGenreBatch = async (genres, batchSize = 3) => {
-//         return await Promise.allSettled(genres.map(async genre => {
-//             try {
-//                 const gamesQuery = `
-//                 fields name, genres, total_rating, cover.image_id; 
-//                 where genres = (${genre.id}) & total_rating != null;
-//                 sort total_rating desc;
-//                 limit ${batchSize};
-//                 `.trim();
-
-//                 const response = await axios.post(
-//                     API_URL + 'games',
-//                     gamesQuery,
-//                     { headers }
-//                 );
-
-//                 const games = response.data.map(game => ({
-//                     ...game,
-//                     cover_url: game.cover 
-//                         ? `https://images.igdb.com/igdb/image/upload/t_cover_big/${game.cover.image_id}.jpg`
-//                         : null
-//                 }));
-
-//                 return { status: 'fulfilled', genre: genre.name, games };
-//             } catch (error) {
-//                 console.error(`Erro ao buscar jogos do gênero ${genre.name}:`, error.message);
-//                 return { status: 'rejected', genre: genre.name, games: [] };
-//             }
-//         }));
-// }
-
-// const genreCache = new NodeCache({stdTTL:3600})
-
-// app.get('/api/games/genres', async (req, res) => {
-//     try {
-//         const cachedGamesByGenre = genreCache.get('genres_games');
-//         if (cachedGamesByGenre) {
-//             return res.status(200).json(cachedGamesByGenre);
-//         }
-
-//         const genresQuery = 'fields id, name; limit 25;';
-//         const genresResponse = await axios.post(
-//             API_URL + 'genres', 
-//             genresQuery, 
-//             { headers }
-//         );
-
-//         if (!genresResponse.data?.length) {
-//             return res.status(404).json({ error: 'Nenhum gênero encontrado' });
-//         }
-
-//         const gamesByGenre = await processGenreBatch(genresResponse.data);
-//         const filteredGames = gamesByGenre.filter(item => item.status === 'fulfilled');
-
-//         genreCache.set('genres_games', filteredGames);
-
-//         res.status(200).json(filteredGames);
-//     } catch (error) {
-//         console.error('Erro ao buscar gêneros:', error);
-//         res.status(500).json({ error: 'Erro ao buscar dados IGDB' });
-//     }
-// });
-
-
-// const PORT = 3000;
-// app.listen(PORT, ()=>{console.log(`Servidor rodando na porta ${PORT}`)})
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -648,194 +288,202 @@ app.get('/api/games/genres', async (req, res) => {
     }
 });
 
-app.get('/api/game/:id',async(req,res)=>{
-    const game = req.params.id
-    let gameQuery;
-    let gameId;
-    //Detalhes dos jogos
-    if (!isNaN(Number(game))) {
-        gameQuery = `
-        fields name, genres, cover, storyline, summary, url, total_rating, platforms, videos, themes; 
-        where id = (${game}); 
-        `;
-    } 
-    //Buscador do header
-    else {
-        gameQuery = `
-        fields name, genres, cover, storyline, summary, url, total_rating, platforms, videos, themes;
-        sort total_rating desc;
-        where (name ~ "${game}"*)|(name ~ *"${game}")|(name ~ *"${game}"*);
-        `;
-    }
+// Define um enum para os níveis de detalhamento
+const EnrichmentLevel = {
+    BASIC: 'basic',      // Para resultados de busca (nome, capa, gêneros)
+    DETAILED: 'detailed' // Para página de detalhes (inclui tudo)
+};
+
+// Endpoint para busca
+app.get('/api/game/search/:name', async (req, res) => {
     try {
-        // Consulta principal dos jogos
-        const games = await axios.post(
-            API_URL+'games',
-            gameQuery,
-            { headers }
-        )
-        gameId = games.data[0].id;
-        
-        // Consulta dos covers
-        const coverIds = games.data
-        .map(game => game.cover)
-        .filter(cover => cover); 
-        const coversQuery = `
-        fields image_id; 
-        where id = (${coverIds.join(',')});
-        `;
-        
-        const covers = await axios.post(
-            API_URL+'covers',
-            coversQuery,
-            { headers }
-        );
-
-        
-        const coverMap = {};
-        
-        covers.data.forEach(cover => {
-            coverMap[cover.id] = `https://images.igdb.com/igdb/image/upload/t_1080p/${cover.image_id}.jpg`;
-        });
-
-        // Consulta dos videos
-        const videoIds = games.data
-        .flatMap(game => game.videos || [])
-
-        const videosQuery = `
-        fields video_id;
-        where id = (${videoIds.join(',')});
-        `
-        const videos = await axios.post(
-            API_URL+'game_videos',
-            videosQuery,
-            { headers }
-        );
-
-        const videoMap = {}
-        videos.data.forEach(video => {
-            videoMap[video.id] = `http://youtube.com/embed/${video.video_id}`
-        })
-
-        // // Consulta dos temas
-        // const themeIds = games.data
-        // .flatMap(game => game.themes ||[])
-
-        // const themesQuery = `
-        // fields name, url;
-        // where id = (${themeIds.join(',')});
-        // `
-
-        // const themes = await axios.post(
-        //     API_URL+'themes',
-        //     themesQuery,
-        //     { headers }
-        // )
-
-        // const themeMap = {}
-        // themes.data.forEach(theme =>{
-        //     themeMap[theme.id] = theme.url
-        // })
-        // Consulta do lançamento
-        const releaseDateQuery = `
-        fields human, date; 
-        where game = ${gameId}; 
-        sort date asc; 
-        limit 1;    
-        `
-        const releaseDate = await axios.post(
-            API_URL+'release_dates',
-            releaseDateQuery, 
-            { headers }
-        )
-        //Consulta de plataformas
-        
-        const allPlatformIds = games.data
-        .flatMap(game=>game.platforms||[])
-
-        const uniquePlatformIds = Array.from(new Set(allPlatformIds))
-
-        const platformsQuery = `
-        fields platform_logo;
-        where id = (${uniquePlatformIds.join(',')});
-        `
-        const platforms = await axios.post(
-            API_URL+'platforms',
-            platformsQuery,
-            { headers }
-        )
-        const platformMap = {}
-        platforms.data.forEach(platform => {
-            platformMap[platform.id] = platform.platform_logo;
-        });
-
-        const platformLogoIds = platforms.data
-            .map(platform=>platform.platform_logo)
-            .filter(id=>id)
-
-        const platformsLogoQuery = `
-        fields image_id,url;
-        where id = (${platformLogoIds.join(',')});
-        `
-
-        const platformsLogo = await axios.post(
-            API_URL+'platform_logos',
-            platformsLogoQuery,
-            { headers }
-        )
-
-        const platformLogoMap = {};
-
-        platformsLogo.data.forEach(platform =>{
-            platformLogoMap[platform.id] = `https://images.igdb.com/igdb/image/upload/t_thumb/${platform.image_id}.jpg`;
-        })
-
-        //Consulta dos gêneros
-        const allGenreIds = games.data
-            .flatMap(game => game.genres || []);
-
-        const uniqueGenreIds = Array.from(new Set(allGenreIds));
-
-        const genresQuery = `
-        fields name; 
-        where id = (${uniqueGenreIds.join(',')}); 
-        limit ${uniqueGenreIds.length};
+        const gameName = req.params.name;
+        const gameQuery = `
+            fields name, genres, cover;
+            sort total_rating desc;
+            where (name ~ "${gameName}"*)|(name ~ *"${gameName}")|(name ~ *"${gameName}"*);
         `;
 
-        const genres = await axios.post(
-            API_URL+'genres',
-            genresQuery,
-            { headers }
+        const games = await axios.post(API_URL + 'games', gameQuery, { headers });
+
+        if (!games.data?.length) {
+            return res.status(404).json({ error: 'Nenhum jogo encontrado' });
+        }
+
+        // Enriquecer com dados básicos
+        const enrichedGames = await Promise.all(
+            games.data.map(game => enrichGameDetails(game, EnrichmentLevel.BASIC))
         );
-
-        const genreMap = {};
-        genres.data.forEach(genre => {
-            genreMap[genre.id] = genre.name;
-        });
-
-        // Juntar os detalhes dos jogos
-        const gameDetails = games.data.map(game => ({
-            ...game,
-            genres: game.genres ? game.genres.map(genreId => genreMap[genreId]) : [],
-
-            cover_url: game.cover ? coverMap[game.cover] : null,
-
-            video_url: game.videos ? game.videos.map(videoId => videoMap[videoId]): [],
-
-            // theme_url: game.themes ? game.themes.map(themeId => themeMap[themeId]):[],
-            
-            release_date: releaseDate.data? releaseDate.data[0].human : null,
-
-            // platforms_logo: game.platforms ? game.platforms.map(platformId => platformLogoMap[platformMap[platformId]]) : [],
-
-        }));
         
-        res.status(200).json(gameDetails)
+        res.status(200).json(enrichedGames);
     } catch (error) {
-        console.error('Erro ao buscar dados: ', error.messsage)
-        res.status(500).json({error:'Erro ao buscar dados IGDB'})
+        console.error('Erro na busca de jogos:', error);
+        res.status(500).json({ error: 'Erro ao buscar jogos' });
     }
-})
+});
+
+// Endpoint para detalhes
+app.get('/api/game/:id', async (req, res) => {
+    try {
+        const gameId = req.params.id;
+        
+        if (isNaN(Number(gameId))) {
+            return res.status(400).json({ error: 'ID do jogo inválido' });
+        }
+
+        const gameQuery = `
+            fields name, genres, cover, storyline, summary, url, total_rating, platforms, videos, themes; 
+            where id = ${gameId};
+        `;
+
+        const gameResponse = await axios.post(API_URL + 'games', gameQuery, { headers });
+
+        if (!gameResponse.data?.length) {
+            return res.status(404).json({ error: 'Jogo não encontrado' });
+        }
+
+        // Enriquecer com dados detalhados
+        const gameDetails = await enrichGameDetails(gameResponse.data[0], EnrichmentLevel.DETAILED);
+        res.status(200).json(gameDetails);
+    } catch (error) {
+        console.error('Erro ao buscar detalhes do jogo:', error);
+        res.status(500).json({ error: 'Erro ao buscar detalhes do jogo' });
+    }
+});
+
+// Função principal de enriquecimento
+async function enrichGameDetails(game, level = EnrichmentLevel.BASIC) {
+    try {
+        // Definir quais dados buscar baseado no nível
+        const enrichments = [];
+
+        // Dados básicos (sempre incluídos)
+        if (game.cover) {
+            enrichments.push(fetchCover(game.cover));
+        }
+        if (game.genres?.length) {
+            enrichments.push(fetchGenres(game.genres));
+        }
+
+        // Dados detalhados (apenas para nível DETAILED)
+        if (level === EnrichmentLevel.DETAILED) {
+            if (game.videos?.length) {
+                enrichments.push(fetchVideos(game.videos));
+            }
+            if (game.id) {
+                enrichments.push(fetchReleaseDate(game.id));
+            }
+            if (game.platforms?.length) {
+                enrichments.push(fetchPlatforms(game.platforms));
+            }
+        }
+
+        // Executar todas as buscas em paralelo
+        const results = await Promise.allSettled(enrichments);
+
+        // Construir objeto de retorno
+        const enrichedGame = { ...game };
+
+        // Processar resultados
+        let currentIndex = 0;
+
+        // Processar cover
+        if (game.cover) {
+            enrichedGame.cover_url = results[currentIndex].status === 'fulfilled' ? 
+                results[currentIndex].value : null;
+            currentIndex++;
+        }
+
+        // Processar gêneros
+        if (game.genres?.length) {
+            enrichedGame.genres = results[currentIndex].status === 'fulfilled' ? 
+                results[currentIndex].value : [];
+            currentIndex++;
+        }
+
+        // Processar dados detalhados
+        if (level === EnrichmentLevel.DETAILED) {
+            if (game.videos?.length) {
+                enrichedGame.video_url = results[currentIndex].status === 'fulfilled' ? 
+                    results[currentIndex].value : [];
+                currentIndex++;
+            }
+            if (game.id) {
+                enrichedGame.release_date = results[currentIndex].status === 'fulfilled' ? 
+                    results[currentIndex].value : null;
+                currentIndex++;
+            }
+            if (game.platforms?.length) {
+                enrichedGame.platforms_info = results[currentIndex].status === 'fulfilled' ? 
+                    results[currentIndex].value : [];
+                currentIndex++;
+            }
+        }
+
+        return enrichedGame;
+    } catch (error) {
+        console.error('Erro ao enriquecer detalhes do jogo:', error);
+        return game; // Retorna dados básicos em caso de erro
+    }
+}
+
+// Funções auxiliares de busca
+async function fetchCover(coverId) {
+    const coversQuery = `fields image_id; where id = ${coverId};`;
+    const response = await axios.post(API_URL + 'covers', coversQuery, { headers });
+    return response.data[0] ? 
+        `https://images.igdb.com/igdb/image/upload/t_1080p/${response.data[0].image_id}.jpg` : 
+        null;
+}
+
+async function fetchGenres(genreIds) {
+    const genresQuery = `fields name; where id = (${genreIds.join(',')});`;
+    const response = await axios.post(API_URL + 'genres', genresQuery, { headers });
+    return response.data.map(genre => genre.name);
+}
+
+async function fetchVideos(videoIds) {
+    const videosQuery = `fields video_id; where id = (${videoIds.join(',')});`;
+    const response = await axios.post(API_URL + 'game_videos', videosQuery, { headers });
+    return response.data.map(video => `http://youtube.com/embed/${video.video_id}`);
+}
+
+async function fetchReleaseDate(gameId) {
+    const query = `fields human; where game = ${gameId}; sort date asc; limit 1;`;
+    const response = await axios.post(API_URL + 'release_dates', query, { headers });
+    return response.data[0]?.human || null;
+}
+
+async function fetchPlatforms(platformIds) {
+    //Busca do nome e id da logo das plataformas
+    const platformsQuery = `fields name, platform_logo; where id = (${platformIds.join(',')});`;
+    const platformsResponse = await axios.post(API_URL + 'platforms', platformsQuery, { headers });
+    
+    // Extrai os Ids dados pelo campo platform_logo
+    const logoIds = platformsResponse.data
+        .filter(platform => platform.platform_logo)
+        .map(platform => platform.platform_logo);
+    
+    // Busca da image_id usando o platform_logo como id
+    let platformLogos = {};
+    if (logoIds.length > 0) {
+        const logoQuery = `fields image_id; where id = (${logoIds.join(',')});`;
+        const logoResponse = await axios.post(API_URL + 'platform_logos', logoQuery, { headers });
+        
+        //Agrupamento das informações das plataformas
+        platformLogos = logoResponse.data.reduce((acc, logo, index) => {
+            acc[logoIds[index]] = `https://images.igdb.com/igdb/image/upload/t_cover_small/${logo.image_id}.png`;
+            return acc;
+        }, {});
+    }
+
+    // Construção do objeto final combinando as informações
+    return platformsResponse.data.map(platform => ({
+        id: platform.id,
+        name: platform.name,
+        logo_url: platform.platform_logo ? platformLogos[platform.platform_logo] : null
+    }));
+}
 
 const PORT = 3000;
 app.listen(PORT, () => {
