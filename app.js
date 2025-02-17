@@ -36,7 +36,7 @@ const headers = {
 
 // Configuração de retry para axios
 axiosRetry(axios, {
-    retries: 3, 
+    retries: 5, 
     retryCondition: (error) => {
         // Verifica se é um erro 429 (Too Many Requests)
         return (
@@ -103,7 +103,7 @@ async function processGames(games, includeCovers = true) {
         .map(game => game.cover)
         .filter(cover => cover);
 
-    const coversQuery = `fields image_id; where id = (${coverIds.join(',')});`;
+    const coversQuery = `fields image_id; where id = (${coverIds.join(',')}); limit ${coverIds.length};`;
     
     const covers = await axios.post(API_URL + 'covers', coversQuery, { headers });
 
@@ -137,77 +137,63 @@ async function processGames(games, includeCovers = true) {
     }));
 }
 
-// Endpoint de jogos populares
 app.get('/api/games', async (req, res) => {
     try {
-        // Verifica cache primeiro
-        const cachedGames = gameCache.get('popular_games');
-        if (cachedGames) {
-            return res.status(200).json(cachedGames);
-        }
+        const GAME_LIMIT = 500;
+        const BATCH_SIZE = 200;
 
-        // Busca jogos populares com fallback
-        const popularGames = await fetchWithFallback(
-            // Busca principal
+        // Verifica cache
+        const cacheKey = `popular_games_${GAME_LIMIT}`;
+        const cachedGames = gameCache.get(cacheKey);
+        if (cachedGames) return res.status(200).json(cachedGames);
+
+        //Buscar IDs por popularidade
+        const orderedIds = await fetchWithFallback(
             async () => {
-                const response = await axios.post(
+                const popular_games = await axios.post(
                     API_URL + 'popularity_primitives',
-                    `
-                    fields game_id,value,popularity_type; 
-                    sort value desc; 
-                    limit 9; 
-                    where popularity_type = 3;
-                    `,
+                    `fields game_id; limit ${GAME_LIMIT}; where popularity_type = 3; sort value desc;`,
                     { headers }
                 );
-                
-                if (!response.data || response.data.length === 0) {
-                    throw new Error('Nenhum jogo popular encontrado');
-                }
-                
-                return response.data;
+                return popular_games.data.map(g => g.game_id);
             },
-            // Fallback
             async () => {
-                const fallbackResponse = await axios.post(
+                const games = await axios.post(
                     API_URL + 'games',
-                    `
-                    fields name, genres, total_rating, cover, url; 
-                    sort total_rating desc;
-                    limit 9;
-                    `,
+                    `fields id; sort total_rating desc; limit ${GAME_LIMIT};`,
                     { headers }
                 );
-                
-                return fallbackResponse.data;
+                return games.data.map(g => g.id);
             }
         );
 
-        // Processamento dos IDs dos jogos
-        const gameIds = popularGames.map(game => 
-            game.game_id || game.id
-        );
+        //Buscar detalhes EM BATCHES
+        const batches = [];
+        for (let i = 0; i < orderedIds.length; i += BATCH_SIZE) {
+            const batchIds = orderedIds.slice(i, i + BATCH_SIZE);
+            const games = await axios.post(
+                API_URL + 'games',
+                `fields name, genres, total_rating, cover, url; 
+                where id = (${batchIds.join(',')}); 
+                limit ${BATCH_SIZE};`,
+                { headers }
+            );
+            batches.push(...games.data);
+        }
 
-        // Resto do processamento mantido igual
-        const gamesQuery = `
-        fields name, genres, total_rating, cover, url; 
-        where id = (${gameIds.join(',')}); 
-        limit 9;
-        `;
-        
-        const games = await axios.post(
-            API_URL + 'games',
-            gamesQuery,
-            { headers }
-        );
+        //Ordenação para manter a ordem original
+        const idIndexMap = new Map();
+        orderedIds.forEach((id, index) => idIndexMap.set(id, index));
 
-        // Processamento dos jogos
-        const gamesDetails = await processGames(games.data);
+        const orderedGames = batches
+            .filter(game => idIndexMap.has(game.id)) // Remove jogos não encontrados
+            .sort((a, b) => idIndexMap.get(a.id) - idIndexMap.get(b.id));
 
-        // Salva no cache
-        gameCache.set('popular_games', gamesDetails);
+        //Processar e cachear
+        const processedGames = await processGames(orderedGames);
+        gameCache.set(cacheKey, processedGames);
 
-        res.status(200).json(gamesDetails);
+        res.status(200).json(processedGames);
 
     } catch (error) {
         console.error('Erro ao buscar dados: ', error.message);
@@ -227,7 +213,7 @@ app.get('/api/games', async (req, res) => {
 });
 
 // Endpoint de jogos por gênero com processamento em lote
-const processGenreBatch = async (genres, batchSize = 9) => {
+const processGenreBatch = async (genres, batchSize = 500) => {
     return await Promise.allSettled(genres.map(async genre => {
         try {
             const gamesQuery = `
@@ -299,7 +285,7 @@ app.get('/api/game/search/:name', async (req, res) => {
     try {
         const gameName = req.params.name;
         const gameQuery = `
-            fields name, genres, cover;
+            fields name, genres, cover, total_rating;
             sort total_rating desc;
             where (name ~ "${gameName}"*)|(name ~ *"${gameName}")|(name ~ *"${gameName}"*);
         `;
@@ -471,10 +457,10 @@ async function fetchPlatforms(platformIds) {
         const logoResponse = await axios.post(API_URL + 'platform_logos', logoQuery, { headers });
         
         //Agrupamento das informações das plataformas
-        platformLogos = logoResponse.data.reduce((acc, logo, index) => {
-            acc[logoIds[index]] = `https://images.igdb.com/igdb/image/upload/t_cover_small/${logo.image_id}.png`;
+        platformLogos = logoResponse.data.reduce((acc, logo) => {
+            acc[logo.id] = `https://images.igdb.com/igdb/image/upload/t_cover_small/${logo.image_id}.png`;
             return acc;
-        }, {});
+        }, {});        
     }
 
     // Construção do objeto final combinando as informações
@@ -482,7 +468,7 @@ async function fetchPlatforms(platformIds) {
         id: platform.id,
         name: platform.name,
         logo_url: platform.platform_logo ? platformLogos[platform.platform_logo] : null
-    }));
+    }));    
 }
 
 const PORT = 3000;
