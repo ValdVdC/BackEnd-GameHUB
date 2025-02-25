@@ -9,72 +9,111 @@ const {
 } = require('../utils/helpers');
 
 module.exports = {
-  getPopularGames: async (req, res) => {
-    try {
-      const GAME_LIMIT = 500;
-      const BATCH_SIZE = 200;
-      const cacheKey = `popular_games_${GAME_LIMIT}`;
-      
-      if (gameCache.get(cacheKey)) return res.status(200).json(gameCache.get(cacheKey));
-
-    //Buscar IDs por popularidade
-        const orderedIds = await fetchWithFallback(
+    getPopularGames: async (req, res) => {
+        try {
+          // Extract pagination parameters from request
+          const page = parseInt(req.query.page) || 1;
+          const pageSize = parseInt(req.query.pageSize) || 500;
+          const offset = (page - 1) * pageSize;
+          
+          // Generate a unique cache key that includes pagination info
+          const cacheKey = `popular_games_${pageSize}_${page}`;
+          
+          // Check if we have this page cached
+          if (gameCache.get(cacheKey)) {
+            return res.status(200).json({
+              games: gameCache.get(cacheKey),
+              pagination: {
+                currentPage: page,
+                pageSize: pageSize,
+                hasMore: true // We'll always assume there might be more unless we hit an empty result
+              }
+            });
+          }
+    
+          // Fetch game IDs with pagination
+          const orderedIds = await fetchWithFallback(
             async () => {
-                const popular_games = await igdbApi.getPopularityPrimitives(
-                    `fields game_id; limit ${GAME_LIMIT}; where popularity_type = 3; sort value desc;`
-                );
-                return popular_games.data.map(g => g.game_id);
+              const popular_games = await igdbApi.getPopularityPrimitives(
+                `fields game_id; 
+                 limit ${pageSize}; 
+                 offset ${offset};
+                 where popularity_type = 3; 
+                 sort value desc;`
+              );
+              return popular_games.data.map(g => g.game_id);
             },
             async () => {
-                const games = await igdbApi.getGames(
-                    `fields id; sort total_rating desc; limit ${GAME_LIMIT};`,
-                );
-                return games.data.map(g => g.id);
+              const games = await igdbApi.getGames(
+                `fields id; 
+                 sort total_rating desc; 
+                 limit ${pageSize}; 
+                 offset ${offset};`
+              );
+              return games.data.map(g => g.id);
             }
-        );
-
-        //Buscar detalhes EM BATCHES
-        const batches = [];
-        for (let i = 0; i < orderedIds.length; i += BATCH_SIZE) {
+          );
+    
+          // If no games found for this page, return appropriate response
+          if (!orderedIds.length) {
+            return res.status(200).json({
+              games: [],
+              pagination: {
+                currentPage: page,
+                pageSize: pageSize,
+                hasMore: false
+              }
+            });
+          }
+    
+          // Fetch game details in batches
+          const BATCH_SIZE = 200;
+          const batches = [];
+          for (let i = 0; i < orderedIds.length; i += BATCH_SIZE) {
             const batchIds = orderedIds.slice(i, i + BATCH_SIZE);
             const games = await igdbApi.getGames(
-                `fields name, genres, total_rating, cover, url; 
-                where id = (${batchIds.join(',')}); 
-                limit ${BATCH_SIZE};`,
+              `fields name, genres, total_rating, cover, url; 
+               where id = (${batchIds.join(',')}); 
+               limit ${BATCH_SIZE};`
             );
             batches.push(...games.data);
-        }
-
-        //Ordenação para manter a ordem original
-        const idIndexMap = new Map();
-        orderedIds.forEach((id, index) => idIndexMap.set(id, index));
-
-        const orderedGames = batches
-            .filter(game => idIndexMap.has(game.id)) // Remove jogos não encontrados
+          }
+    
+          // Maintain original order
+          const idIndexMap = new Map();
+          orderedIds.forEach((id, index) => idIndexMap.set(id, index));
+    
+          const orderedGames = batches
+            .filter(game => idIndexMap.has(game.id))
             .sort((a, b) => idIndexMap.get(a.id) - idIndexMap.get(b.id));
-
-        //Processar e cachear
-        const processedGames = await processGames(orderedGames);
-        gameCache.set(cacheKey, processedGames);
-
-        res.status(200).json(processedGames);
-
-    } catch (error) {
-        console.error('Erro ao buscar dados: ', error.message);
-        
-        // Tratamento de erro mais detalhado
-        if (error.response) {
-            // Erro com resposta do servidor
+    
+          // Process and cache the results
+          const processedGames = await processGames(orderedGames);
+          gameCache.set(cacheKey, processedGames);
+    
+          // Return paginated response
+          res.status(200).json({
+            games: processedGames,
+            pagination: {
+              currentPage: page,
+              pageSize: pageSize,
+              hasMore: processedGames.length === pageSize // If we got a full page, there might be more
+            }
+          });
+    
+        } catch (error) {
+          console.error('Error fetching data: ', error.message);
+          
+          if (error.response) {
             res.status(error.response.status).json({ 
-                error: 'Erro ao buscar dados IGDB',
-                details: error.response.data 
+              error: 'Error fetching IGDB data',
+              details: error.response.data 
             });
-        } else {
-            // Erro sem resposta (ex: erro de rede)
-            res.status(500).json({ error: 'Erro de conexão' });
+          } else {
+            res.status(500).json({ error: 'Connection error' });
+          }
         }
-    }
-  },
+      },
 
   getGamesByGenre: async (req, res) => {
     try {
