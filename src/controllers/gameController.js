@@ -13,7 +13,7 @@ module.exports = {
         try {
           // Extract pagination parameters from request
           const page = parseInt(req.query.page) || 1;
-          const pageSize = parseInt(req.query.pageSize) || 500;
+          const pageSize = parseInt(req.query.pageSize) || 200;
           const offset = (page - 1) * pageSize;
           
           // Generate a unique cache key that includes pagination info
@@ -148,6 +148,7 @@ module.exports = {
         fields name, genres, cover, total_rating;
         sort total_rating desc;
         where (name ~ "${gameName}"*)|(name ~ *"${gameName}")|(name ~ *"${gameName}"*);
+        limit 32;
       `;
 
       const games = await igdbApi.getGames(gameQuery);
