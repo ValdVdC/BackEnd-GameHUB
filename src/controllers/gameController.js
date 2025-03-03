@@ -255,32 +255,138 @@ module.exports = {
         }
       },
 
-  searchGames: async (req, res) => {
-    try {
-      const gameName = req.params.name;
-      const gameQuery = `
-        fields name, genres, cover, total_rating;
-        sort total_rating desc;
-        where (name ~ "${gameName}"*)|(name ~ *"${gameName}")|(name ~ *"${gameName}"*);
-        limit 16;
-      `;
+      searchGames: async (req, res) => {
+        try {
+          const gameName = req.params.name;
+          const page = parseInt(req.query.page) || 1;
+          const pageSize = parseInt(req.query.pageSize) || 500;
+          const offset = (page - 1) * pageSize;
+          
+          // Gerar chave de cache para esta busca específica
+          const cacheKey = `search_${gameName}_${pageSize}_${page}`;
+          
+          // Verificar cache primeiro
+          if (gameCache.get(cacheKey)) {
+            return res.status(200).json({
+              games: gameCache.get(cacheKey),
+              pagination: {
+                currentPage: page,
+                pageSize: pageSize,
+                hasMore: true // Assumimos que pode haver mais resultados
+              }
+            });
+          }
+      
+          // Buscar IDs dos jogos que correspondem à pesquisa
+          const searchQuery = `
+            fields id;
+            sort total_rating desc;
+            where (name ~ "${gameName}"*)|(name ~ *"${gameName}")|(name ~ *"${gameName}"*);
+            limit ${pageSize};
+            offset ${offset};
+          `;
+      
+          const searchResults = await igdbApi.getGames(searchQuery);
+          
+          if (!searchResults.data?.length) {
+            return res.status(200).json({
+              games: [],
+              pagination: {
+                currentPage: page,
+                pageSize: pageSize,
+                hasMore: false
+              }
+            });
+          }
+          
+          // Extrair IDs dos jogos encontrados
+          const gameIds = searchResults.data.map(game => game.id);
+          
+          // Buscar valores de popularidade para os jogos encontrados
+          const popularityMap = new Map();
+          
+          try {
+            const popularityQuery = `
+              fields game_id, value;
+              where game_id = (${gameIds.join(',')}) & popularity_type = 3;
+              limit ${gameIds.length};
+            `;
+            
+            const popularityResult = await igdbApi.getPopularityPrimitives(popularityQuery);
+            
+            // Mapear valores de popularidade por ID do jogo
+            popularityResult.data.forEach(item => {
+              popularityMap.set(item.game_id, item.value);
+            });
+          } catch (error) {
+            console.warn('Erro ao buscar popularity_primitives:', error.message);
+            // Continuar mesmo sem os dados de popularidade
+          }
+          
+          // Buscar detalhes completos dos jogos em batches
+          const BATCH_SIZE = 200;
+          const gameDetailsBatches = [];
+          
+          for (let i = 0; i < gameIds.length; i += BATCH_SIZE) {
+            const batchIds = gameIds.slice(i, i + BATCH_SIZE);
+            
+            const detailsQuery = 
+            `fields name, genres.name, total_rating, cover.url, id, url;
+            where id = (${batchIds.join(',')});
+            limit ${BATCH_SIZE};
+            `;
+            
+            const gamesDetails = await igdbApi.getGames(detailsQuery);
+            gameDetailsBatches.push(...gamesDetails.data);
+          }
+          
+          // Processar e enriquecer os detalhes dos jogos
 
-      const games = await igdbApi.getGames(gameQuery);
+          const processedGames = gameDetailsBatches.map(game => {
+            return {
+              id: game.id,
+              name: game.name,
+              genres: game.genres ? game.genres.map(g => g.name) : [],
+              cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_cover_big') : null,
+              total_rating: game.total_rating || 0,
+              // Incluir o valor de popularidade no objeto do jogo
+              popularity_value: popularityMap.get(game.id) || 0
+            };
+          });
 
-      if (!games.data?.length) {
-        return res.status(404).json({ error: 'Nenhum jogo encontrado' });
-      }
-
-      const enrichedGames = await Promise.all(
-        games.data.map(game => enrichGameDetails(game, EnrichmentLevel.BASIC))
-      );
-
-      res.status(200).json(enrichedGames);
-    } catch (error) {
-      console.error('Erro na busca de jogos:', error);
-      res.status(500).json({ error: 'Erro ao buscar jogos' });
-    }
-  },
+          // Manter a ordem original dos resultados da busca
+          const orderedResults = [];
+          gameIds.forEach(id => {
+            const game = processedGames.find(g => g.id === id);
+            if (game) orderedResults.push(game);
+          });
+          
+          // Cachear os resultados
+          gameCache.set(cacheKey, orderedResults);
+          
+          // Retornar resultados paginados
+          res.status(200).json({
+            games: orderedResults,
+            pagination: {
+              currentPage: page,
+              pageSize: pageSize,
+              hasMore: orderedResults.length === pageSize // Se temos uma página completa, pode haver mais
+            }
+          });
+          
+        } catch (error) {
+          console.error('Erro na busca de jogos:', error);
+          
+          if (error.response) {
+            res.status(error.response.status).json({ 
+              error: 'Erro ao buscar dados IGDB',
+              details: error.response.data 
+            });
+          } else {
+            res.status(500).json({ error: 'Erro de conexão' });
+          }
+        }
+      },
 
   getGameDetails: async (req, res) => {
     try {
