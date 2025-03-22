@@ -199,7 +199,7 @@ module.exports = {
               id: game.id,
               name: game.name,
               genres: game.genres ? game.genres.map(g => g.name) : [],
-              cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_cover_big') : null,
+              cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_1080p') : null,
               total_rating: game.total_rating || 0,
               // Incluir o valor de popularidade no objeto do jogo
               popularity_value: popularityMap.get(game.id) || 0
@@ -347,7 +347,7 @@ module.exports = {
               id: game.id,
               name: game.name,
               genres: game.genres ? game.genres.map(g => g.name) : [],
-              cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_cover_big') : null,
+              cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_1080p') : null,
               total_rating: game.total_rating || 0,
               // Incluir o valor de popularidade no objeto do jogo
               popularity_value: popularityMap.get(game.id) || 0
