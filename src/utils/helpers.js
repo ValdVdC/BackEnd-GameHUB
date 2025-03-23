@@ -49,9 +49,26 @@ async function processGames(games, includeCovers = true) {
           genreMap[genre.id] = genre.name;
       });
   
-      // Monta os detalhes finais dos jogos
+      const allPlatformIds = games.flatMap(game => game.platforms || []);
+      const uniquePlatformIds = Array.from(new Set(allPlatformIds));
+  
+      const platformsQuery = `
+          fields name, platform_logo; 
+          where id = (${uniquePlatformIds.join(',')}); 
+          limit ${uniquePlatformIds.length};
+      `;
+      
+      const platforms = await igdbApi.getPlatforms(platformsQuery);
+      
+      const platformMap = {};
+      platforms.data.forEach(platform => {
+          platformMap[platform.id] = platform.name;
+      });
+  
+      // Mapear plataformas para os jogos
       return games.map(game => ({
           ...game,
+          platforms: game.platforms ? game.platforms.map(platformId => platformMap[platformId]) : [],
           genres: game.genres ? game.genres.map(genreId => genreMap[genreId]) : [],
           cover_url: includeCovers && game.cover ? coverMap[game.cover] : null
       }));

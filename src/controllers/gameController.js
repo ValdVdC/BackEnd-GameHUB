@@ -72,8 +72,8 @@ module.exports = {
           for (let i = 0; i < orderedIds.length; i += BATCH_SIZE) {
             const batchIds = orderedIds.slice(i, i + BATCH_SIZE);
             const games = await igdbApi.getGames(
-              `fields name, genres, total_rating, cover, url; 
-               where id = (${batchIds.join(',')}); 
+              `fields name, genres, platforms, total_rating, cover, url; 
+               where id = (${batchIds.join(',')}) & themes != (42); 
                limit ${BATCH_SIZE};`
             );
             batches.push(...games.data);
@@ -414,5 +414,194 @@ module.exports = {
             console.error('Erro ao buscar detalhes do jogo:', error);
             res.status(500).json({ error: 'Erro ao buscar detalhes do jogo' });
         }
+    },
+    getGamesByPlatform: async (req, res) => {
+      try {
+        // Verificar o cache primeiro
+        const cachedGamesByPlatform = gameCache.get('platforms_families_games');
+        if (cachedGamesByPlatform) {
+          return res.status(200).json(cachedGamesByPlatform);
+        }
+    
+        // Definir famílias de plataformas
+        const platformFamilies = [
+          {
+            id: 1,
+            name: 'PlayStation',
+            platforms: [7, 8, 9, 48, 167, 38, 46], // PS1, PS2, PS3, PS4, PS5, PSP, PS Vita
+            keywords: ['playstation', 'ps1', 'ps2', 'ps3', 'ps4', 'ps5', 'psp', 'vita']
+          },
+          {
+            id: 2,
+            name: 'Xbox',
+            platforms: [11, 12, 49, 169], // Xbox, Xbox 360, Xbox One, Xbox Series X|S
+            keywords: ['xbox', 'xbox360', 'xboxone', 'series']
+          },
+          {
+            id: 3,
+            name: 'Nintendo',
+            platforms: [4, 5, 18, 19, 20, 21, 22, 130, 41], // N64, SNES, NES, Wii, GameCube, Switch, 3DS, etc.
+            keywords: ['nintendo', 'switch', 'wii', 'gamecube', 'n64', 'nes', 'snes', '3ds', 'ds']
+          },
+          {
+            id: 4,
+            name: 'PC',
+            platforms: [6, 14], // PC, Mac
+            keywords: ['pc', 'windows', 'mac', 'linux', 'computer']
+          },
+          {
+            id: 5,
+            name: 'Mobile',
+            platforms: [34, 39], // Android, iOS
+            keywords: ['android', 'ios', 'iphone', 'mobile', 'smartphone', 'tablet']
+          }
+        ];
+        
+        // Reduzir o limite para o mesmo da versão antiga que funcionava
+        const POPULAR_GAMES_LIMIT = 500;
+        
+        // Criar um mapa para armazenar os valores de popularidade
+        const popularityMap = new Map();
+        
+        // Buscar lista de jogos populares com seus valores de popularidade
+        // Usando a mesma consulta da versão antiga
+        const popularGamesIds = await fetchWithFallback(
+          async () => {
+            const popular_games = await igdbApi.getPopularityPrimitives(
+              `fields game_id, value; 
+               limit ${POPULAR_GAMES_LIMIT}; 
+               where popularity_type = 3; 
+               sort value desc;`
+            );
+            // Armazenar os valores de popularidade no mapa
+            popular_games.data.forEach(item => {
+              popularityMap.set(item.game_id, item.value);
+            });
+            return popular_games.data.map(g => g.game_id);
+          },
+          async () => {
+            const games = await igdbApi.getGames(
+              `fields id, total_rating; 
+               sort total_rating desc; 
+               limit ${POPULAR_GAMES_LIMIT};`
+            );
+            // Se usarmos o fallback, usamos o total_rating como substituto para o valor de popularidade
+            games.data.forEach(item => {
+              popularityMap.set(item.id, item.total_rating || 0);
+            });
+            return games.data.map(g => g.id);
+          }
+        );
+    
+        // Se não encontrou jogos populares, retornar erro
+        if (!popularGamesIds.length) {
+          return res.status(404).json({ error: 'Nenhum jogo popular encontrado' });
+        }
+    
+        // Buscar detalhes dos jogos populares em batches
+        const BATCH_SIZE = 200;
+        const popularGamesBatches = [];
+        
+        // Usar a mesma consulta que funcionava anteriormente
+        for (let i = 0; i < popularGamesIds.length; i += BATCH_SIZE) {
+          const batchIds = popularGamesIds.slice(i, i + BATCH_SIZE);
+          const gamesDetails = await igdbApi.getGames(
+            `fields name, platforms.name, total_rating, cover.url, id, url; 
+             where id = (${batchIds.join(',')}); 
+             limit ${BATCH_SIZE};`
+          );
+          popularGamesBatches.push(...gamesDetails.data);
+        }
+    
+        // Processar detalhes para facilitar a filtragem
+        // Usar o mesmo processamento que funcionava antes
+        const processedGames = popularGamesBatches.map(game => {
+          return {
+            id: game.id,
+            name: game.name,
+            platforms: game.platforms ? game.platforms.map(p => typeof p === 'object' ? p.name : p) : [],
+            cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_1080p') : null,
+            total_rating: game.total_rating || 0,
+            popularity_value: popularityMap.get(game.id) || 0
+          };
+        });
+    
+        // Inicializar um objeto para armazenar jogos por família de plataforma
+        const gamesByFamily = {};
+        platformFamilies.forEach(family => {
+          gamesByFamily[family.name] = new Set();
+        });
+    
+        // Atribuir jogos às famílias de plataformas
+        processedGames.forEach(game => {
+          if (!game.platforms || game.platforms.length === 0) return;
+          
+          // Determinar quais famílias de plataformas este jogo pertence
+          const belongsToFamilies = new Set();
+          
+          game.platforms.forEach(platformName => {
+            platformFamilies.forEach(family => {
+              // Verificar pelo nome da plataforma usando palavras-chave
+              const platformNameLower = typeof platformName === 'string' ? platformName.toLowerCase() : '';
+              for (const keyword of family.keywords) {
+                if (platformNameLower.includes(keyword)) {
+                  belongsToFamilies.add(family.name);
+                  break;
+                }
+              }
+            });
+          });
+          
+          // Se o jogo pertence a pelo menos uma família
+          if (belongsToFamilies.size > 0) {
+            // Para jogos em múltiplas plataformas, escolher a família com menos jogos
+            let selectedFamily = null;
+            let minSize = Infinity;
+            
+            belongsToFamilies.forEach(familyName => {
+              if (gamesByFamily[familyName].size < minSize) {
+                minSize = gamesByFamily[familyName].size;
+                selectedFamily = familyName;
+              }
+            });
+            
+            if (selectedFamily) {
+              gamesByFamily[selectedFamily].add(game);
+            }
+          }
+        });
+    
+        // Converter os Sets para arrays e ordenar por popularidade
+        const result = platformFamilies.map(family => {
+          const familyGames = Array.from(gamesByFamily[family.name]);
+          
+          // Ordenar jogos por popularidade
+          const sortedGames = familyGames.sort((a, b) => b.popularity_value - a.popularity_value);
+          
+          // Limitar a 15 jogos por família
+          const limitedGames = sortedGames.slice(0, 15);
+          
+          return {
+            id: family.id,
+            value: {
+              platform: family.name,
+              games: limitedGames
+            },
+            status: 'fulfilled'
+          };
+        });
+    
+        // Filtrar famílias que não têm jogos
+        const filteredResult = result.filter(item => item.value.games.length > 0);
+    
+        // Armazenar em cache
+        gameCache.set('platforms_families_games', filteredResult);
+    
+        // Retornar resultado
+        res.status(200).json(filteredResult);
+      } catch (error) {
+        console.error('Erro ao buscar jogos por família de plataforma:', error);
+        res.status(500).json({ error: 'Erro ao buscar dados IGDB' });
+      }
     }
 };
