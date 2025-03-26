@@ -326,32 +326,48 @@ module.exports = {
           // Buscar detalhes completos dos jogos em batches
           const BATCH_SIZE = 200;
           const gameDetailsBatches = [];
-          
-          for (let i = 0; i < gameIds.length; i += BATCH_SIZE) {
-            const batchIds = gameIds.slice(i, i + BATCH_SIZE);
-            
-            const detailsQuery = 
-            `fields name, genres.name, total_rating, cover.url, id, url;
-            where id = (${batchIds.join(',')});
-            limit ${BATCH_SIZE};
-            `;
-            
-            const gamesDetails = await igdbApi.getGames(detailsQuery);
-            gameDetailsBatches.push(...gamesDetails.data);
-          }
-          
-          // Processar e enriquecer os detalhes dos jogos
 
+          for (let i = 0; i < gameIds.length; i += BATCH_SIZE) {
+              const batchIds = gameIds.slice(i, i + BATCH_SIZE);
+              
+              const detailsQuery = 
+              `fields name, genres.name, total_rating, cover.url, id, url, platforms;
+              where id = (${batchIds.join(',')});
+              limit ${BATCH_SIZE};
+              `;
+              
+              const gamesDetails = await igdbApi.getGames(detailsQuery);
+              gameDetailsBatches.push(...gamesDetails.data);
+          }
+
+          // Processar plataformas
+          const allPlatformIds = gameDetailsBatches.flatMap(game => game.platforms || []);
+          const uniquePlatformIds = Array.from(new Set(allPlatformIds));
+
+          const platformsQuery = `
+              fields name; 
+              where id = (${uniquePlatformIds.join(',')}); 
+              limit ${uniquePlatformIds.length};
+          `;
+
+          const platforms = await igdbApi.getPlatforms(platformsQuery);
+
+          const platformMap = {};
+          platforms.data.forEach(platform => {
+              platformMap[platform.id] = platform.name;
+          });
+
+          // Processar e enriquecer os detalhes dos jogos
           const processedGames = gameDetailsBatches.map(game => {
-            return {
-              id: game.id,
-              name: game.name,
-              genres: game.genres ? game.genres.map(g => g.name) : [],
-              cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_1080p') : null,
-              total_rating: game.total_rating || 0,
-              // Incluir o valor de popularidade no objeto do jogo
-              popularity_value: popularityMap.get(game.id) || 0
-            };
+              return {
+                  id: game.id,
+                  name: game.name,
+                  genres: game.genres ? game.genres.map(g => g.name) : [],
+                  platforms: game.platforms ? game.platforms.map(platformId => platformMap[platformId]) : [],
+                  cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_1080p') : null,
+                  total_rating: game.total_rating || 0,
+                  popularity_value: popularityMap.get(game.id) || 0
+              };
           });
 
           // Manter a ordem original dos resultados da busca
