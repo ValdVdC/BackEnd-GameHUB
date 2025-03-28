@@ -18,60 +18,96 @@ async function fetchWithFallback(primaryFetch, fallbackFetch) {
 }
 
 async function processGames(games, includeCovers = true) {
-      // Processamento de capas
-      const coverIds = games
-          .map(game => game.cover)
-          .filter(cover => cover);
-  
-      const coversQuery = `fields image_id; where id = (${coverIds.join(',')}); limit ${coverIds.length};`;
-      
-      const covers = await igdbApi.getCovers(coversQuery);
-  
-      const coverMap = {};
-      covers.data.forEach(cover => {
-          coverMap[cover.id] = `https://images.igdb.com/igdb/image/upload/t_1080p/${cover.image_id}.jpg`;
-      });
-  
-      // Processamento de gêneros
-      const allGenreIds = games.flatMap(game => game.genres || []);
-      const uniqueGenreIds = Array.from(new Set(allGenreIds));
-  
-      const genresQuery = `
-      fields name; 
-      where id = (${uniqueGenreIds.join(',')}); 
-      limit ${uniqueGenreIds.length};
-      `;
-  
-      const genres = await igdbApi.getGenres(genresQuery);
-  
-      const genreMap = {};
-      genres.data.forEach(genre => {
-          genreMap[genre.id] = genre.name;
-      });
-  
-      const allPlatformIds = games.flatMap(game => game.platforms || []);
-      const uniquePlatformIds = Array.from(new Set(allPlatformIds));
-  
-      const platformsQuery = `
-          fields name, platform_logo; 
-          where id = (${uniquePlatformIds.join(',')}); 
-          limit ${uniquePlatformIds.length};
-      `;
-      
-      const platforms = await igdbApi.getPlatforms(platformsQuery);
-      
-      const platformMap = {};
-      platforms.data.forEach(platform => {
-          platformMap[platform.id] = platform.name;
-      });
-  
-      // Mapear plataformas para os jogos
-      return games.map(game => ({
-          ...game,
-          platforms: game.platforms ? game.platforms.map(platformId => platformMap[platformId]) : [],
-          genres: game.genres ? game.genres.map(genreId => genreMap[genreId]) : [],
-          cover_url: includeCovers && game.cover ? coverMap[game.cover] : null
-      }));
+    // Processamento de capas (código existente)
+    const coverIds = games
+        .map(game => game.cover)
+        .filter(cover => cover);
+
+    const coversQuery = `fields image_id; where id = (${coverIds.join(',')}); limit ${coverIds.length};`;
+    
+    const covers = await igdbApi.getCovers(coversQuery);
+
+    const coverMap = {};
+    covers.data.forEach(cover => {
+        coverMap[cover.id] = `https://images.igdb.com/igdb/image/upload/t_1080p/${cover.image_id}.jpg`;
+    });
+
+    // Processamento de gêneros (código existente)
+    const allGenreIds = games.flatMap(game => game.genres || []);
+    const uniqueGenreIds = Array.from(new Set(allGenreIds));
+
+    const genresQuery = `
+    fields name; 
+    where id = (${uniqueGenreIds.join(',')}); 
+    limit ${uniqueGenreIds.length};
+    `;
+
+    const genres = await igdbApi.getGenres(genresQuery);
+
+    const genreMap = {};
+    genres.data.forEach(genre => {
+        genreMap[genre.id] = genre.name;
+    });
+
+    // Processamento de plataformas (código existente)
+    const allPlatformIds = games.flatMap(game => game.platforms || []);
+    const uniquePlatformIds = Array.from(new Set(allPlatformIds));
+
+    const platformsQuery = `
+        fields name, platform_logo; 
+        where id = (${uniquePlatformIds.join(',')}); 
+        limit ${uniquePlatformIds.length};
+    `;
+    
+    const platforms = await igdbApi.getPlatforms(platformsQuery);
+    
+    const platformMap = {};
+    platforms.data.forEach(platform => {
+        platformMap[platform.id] = platform.name;
+    });
+
+    // Novos processamentos para temas e modos de jogo
+    const allThemeIds = games.flatMap(game => game.themes || []);
+    const uniqueThemeIds = Array.from(new Set(allThemeIds));
+
+    const themesQuery = `
+    fields name; 
+    where id = (${uniqueThemeIds.join(',')}); 
+    limit ${uniqueThemeIds.length};
+    `;
+
+    const themes = await igdbApi.getThemes(themesQuery);
+
+    const themeMap = {};
+    themes.data.forEach(theme => {
+        themeMap[theme.id] = theme.name;
+    });
+
+    const allGameModeIds = games.flatMap(game => game.game_modes || []);
+    const uniqueGameModeIds = Array.from(new Set(allGameModeIds));
+
+    const gameModesQuery = `
+    fields name; 
+    where id = (${uniqueGameModeIds.join(',')}); 
+    limit ${uniqueGameModeIds.length};
+    `;
+
+    const gameModes = await igdbApi.getGameModes(gameModesQuery);
+
+    const gameModeMap = {};
+    gameModes.data.forEach(gameMode => {
+        gameModeMap[gameMode.id] = gameMode.name;
+    });
+
+    // Mapear informações para os jogos
+    return games.map(game => ({
+        ...game,
+        platforms: game.platforms ? game.platforms.map(platformId => platformMap[platformId]) : [],
+        genres: game.genres ? game.genres.map(genreId => genreMap[genreId]) : [],
+        themes: game.themes ? game.themes.map(themeId => themeMap[themeId]) : [],
+        game_modes: game.game_modes ? game.game_modes.map(gameModeId => gameModeMap[gameModeId]) : [],
+        cover_url: includeCovers && game.cover ? coverMap[game.cover] : null
+    }));
 }
 
 async function processGenreBatch(genres, batchSize = 500) {
@@ -125,6 +161,13 @@ async function enrichGameDetails(game, level = EnrichmentLevel.BASIC) {
             if (game.platforms?.length) {
                 enrichments.push(fetchPlatforms(game.platforms));
             }
+
+            if (game.themes?.length) {
+                enrichments.push(fetchThemes(game.themes));
+            }
+            if (game.game_modes?.length) {
+                enrichments.push(fetchGameModes(game.game_modes));
+            }
         }
 
         // Executar todas as buscas em paralelo
@@ -164,6 +207,16 @@ async function enrichGameDetails(game, level = EnrichmentLevel.BASIC) {
             }
             if (game.platforms?.length) {
                 enrichedGame.platforms_info = results[currentIndex].status === 'fulfilled' ? 
+                    results[currentIndex].value : [];
+                currentIndex++;
+            }
+            if (game.themes?.length) {
+                enrichedGame.themes = results[currentIndex].status === 'fulfilled' ? 
+                    results[currentIndex].value : [];
+                currentIndex++;
+            }
+            if (game.game_modes?.length) {
+                enrichedGame.game_modes = results[currentIndex].status === 'fulfilled' ? 
                     results[currentIndex].value : [];
                 currentIndex++;
             }
@@ -234,7 +287,17 @@ async function fetchPlatforms(platformIds) {
           logo_url: platform.platform_logo ? platformLogos[platform.platform_logo] : null
       }));    
 }
+async function fetchThemes(themeIds) {
+    const themesQuery = `fields name; where id = (${themeIds.join(',')});`;
+    const response = await igdbApi.getThemes(themesQuery);
+    return response.data.map(theme => theme.name);
+}
 
+async function fetchGameModes(gameModeIds) {
+    const gameModesQuery = `fields name; where id = (${gameModeIds.join(',')});`;
+    const response = await igdbApi.getGameModes(gameModesQuery);
+    return response.data.map(gameMode => gameMode.name);
+}
 module.exports = {
   fetchWithFallback,
   processGames,

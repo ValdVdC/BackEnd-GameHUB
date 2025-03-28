@@ -35,5 +35,7 @@ module.exports = {
   getGameVideos: (query) => apiRequest('game_videos', query),
   getReleaseDates: (query) => apiRequest('release_dates', query),
   getPlatforms: (query) => apiRequest('platforms', query),
-  getPlatformLogos: (query) => apiRequest('platform_logos', query)
+  getPlatformLogos: (query) => apiRequest('platform_logos', query),
+  getThemes: (query) => apiRequest('themes', query),
+  getGameModes: (query) => apiRequest('game_modes', query)
 };

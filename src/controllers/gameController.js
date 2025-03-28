@@ -72,7 +72,7 @@ module.exports = {
           for (let i = 0; i < orderedIds.length; i += BATCH_SIZE) {
             const batchIds = orderedIds.slice(i, i + BATCH_SIZE);
             const games = await igdbApi.getGames(
-              `fields name, genres, platforms, total_rating, cover, url; 
+              `fields name, genres, platforms, total_rating, cover, url, themes, game_modes; 
                where id = (${batchIds.join(',')}) & themes != (42); 
                limit ${BATCH_SIZE};`
             );
@@ -187,7 +187,7 @@ module.exports = {
             const batchIds = popularGamesIds.slice(i, i + BATCH_SIZE);
             const gamesDetails = await igdbApi.getGames(
               `fields name, genres.name, total_rating, cover.url, id, url; 
-               where id = (${batchIds.join(',')}); 
+               where id = (${batchIds.join(',')}) & themes != (42); 
                limit ${BATCH_SIZE};`
             );
             popularGamesBatches.push(...gamesDetails.data);
@@ -331,7 +331,7 @@ module.exports = {
               const batchIds = gameIds.slice(i, i + BATCH_SIZE);
               
               const detailsQuery = 
-              `fields name, genres.name, total_rating, cover.url, id, url, platforms;
+              `fields name, genres.name, total_rating, cover.url, id, url, platforms, themes, game_modes;
               where id = (${batchIds.join(',')});
               limit ${BATCH_SIZE};
               `;
@@ -413,7 +413,7 @@ module.exports = {
             }
 
             const gameQuery = `
-                fields name, genres, cover, storyline, summary, url, total_rating, platforms, videos, themes; 
+                fields name, genres, cover, storyline, summary, url, total_rating, platforms, videos, themes, game_modes; 
                 where id = ${gameId};
             `;
 
@@ -523,7 +523,7 @@ module.exports = {
           const batchIds = popularGamesIds.slice(i, i + BATCH_SIZE);
           const gamesDetails = await igdbApi.getGames(
             `fields name, platforms.name, total_rating, cover.url, id, url; 
-             where id = (${batchIds.join(',')}); 
+             where id = (${batchIds.join(',')}) & themes != (42); 
              limit ${BATCH_SIZE};`
           );
           popularGamesBatches.push(...gamesDetails.data);
@@ -619,5 +619,240 @@ module.exports = {
         console.error('Erro ao buscar jogos por família de plataforma:', error);
         res.status(500).json({ error: 'Erro ao buscar dados IGDB' });
       }
-    }
+    },
+    getGamesByTheme: async (req, res) => {
+      try {
+        // Check cache first
+        const cachedGamesByTheme = gameCache.get('themes_games');
+        if (cachedGamesByTheme) {
+          return res.status(200).json(cachedGamesByTheme);
+        }
+    
+        // Get themes
+        const themesQuery = 'fields id, name; limit 25; where id != 42;';
+        const themesResponse = await igdbApi.getThemes(themesQuery);
+    
+        if (!themesResponse.data?.length) {
+          return res.status(404).json({ error: 'No themes found' });
+        }
+    
+        const POPULAR_GAMES_LIMIT = 500;
+        const popularityMap = new Map();
+        
+        // Fetch popular games
+        const popularGamesIds = await fetchWithFallback(
+          async () => {
+            const popular_games = await igdbApi.getPopularityPrimitives(
+              `fields game_id, value; 
+               limit ${POPULAR_GAMES_LIMIT}; 
+               where popularity_type = 3; 
+               sort value desc;`
+            );
+            popular_games.data.forEach(item => {
+              popularityMap.set(item.game_id, item.value);
+            });
+            return popular_games.data.map(g => g.game_id);
+          },
+          async () => {
+            const games = await igdbApi.getGames(
+              `fields id, total_rating; 
+               sort total_rating desc; 
+               limit ${POPULAR_GAMES_LIMIT};`
+            );
+            games.data.forEach(item => {
+              popularityMap.set(item.id, item.total_rating || 0);
+            });
+            return games.data.map(g => g.id);
+          }
+        );
+    
+        // Fetch game details in batches
+        const BATCH_SIZE = 200;
+        const popularGamesBatches = [];
+        
+        for (let i = 0; i < popularGamesIds.length; i += BATCH_SIZE) {
+          const batchIds = popularGamesIds.slice(i, i + BATCH_SIZE);
+          const gamesDetails = await igdbApi.getGames(
+            `fields name, themes.name, total_rating, cover.url, id, url; 
+             where id = (${batchIds.join(',')}) & themes != (42); 
+             limit ${BATCH_SIZE};`
+          );
+          popularGamesBatches.push(...gamesDetails.data);
+        }
+    
+        // Process game details
+        const processedGames = popularGamesBatches.map(game => ({
+          id: game.id,
+          name: game.name,
+          themes: game.themes ? game.themes.map(t => t.name) : [],
+          cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_1080p') : null,
+          total_rating: game.total_rating || 0,
+          popularity_value: popularityMap.get(game.id) || 0
+        }));
+    
+        // Create a map of themes to games
+        const themeMap = {};
+        themesResponse.data.forEach(theme => {
+          themeMap[theme.name] = [];
+        });
+    
+        // Filter games by theme
+        processedGames.forEach(game => {
+          game.themes.forEach(themeName => {
+            if (themeMap[themeName]) {
+              if (!themeMap[themeName].some(existingGame => existingGame.id === game.id)) {
+                themeMap[themeName].push(game);
+              }
+            }
+          });
+        });
+    
+        // Convert map to result array
+        const result = Object.entries(themeMap).map(([themeName, games]) => {
+          const theme = themesResponse.data.find(t => t.name === themeName);
+          
+          // Sort games by popularity within each theme
+          const sortedGames = games.sort((a, b) => b.popularity_value - a.popularity_value);
+          
+          return {
+            id: theme ? theme.id : null,
+            value: {
+              theme: themeName,
+              games: sortedGames
+            },
+            status: 'fulfilled'
+          };
+        });
+    
+        // Filter to ensure only themes with games are returned
+        const filteredResult = result.filter(item => item.value.games.length > 0);
+    
+        // Cache the result
+        gameCache.set('themes_games', filteredResult);
+    
+        // Return result
+        res.status(200).json(filteredResult);
+      } catch (error) {
+        console.error('Error fetching themes:', error);
+        res.status(500).json({ error: 'Error fetching IGDB data' });
+      }
+    },
+  
+    getGamesByGameMode: async (req, res) => {
+      try {
+        // Check cache first
+        const cachedGamesByGameMode = gameCache.get('game_modes_games');
+        if (cachedGamesByGameMode) {
+          return res.status(200).json(cachedGamesByGameMode);
+        }
+    
+        // Get game modes
+        const gameModesQuery = 'fields id, name; limit 25;';
+        const gameModesResponse = await igdbApi.getGameModes(gameModesQuery);
+    
+        if (!gameModesResponse.data?.length) {
+          return res.status(404).json({ error: 'No game modes found' });
+        }
+    
+        const POPULAR_GAMES_LIMIT = 500;
+        const popularityMap = new Map();
+        
+        // Fetch popular games
+        const popularGamesIds = await fetchWithFallback(
+          async () => {
+            const popular_games = await igdbApi.getPopularityPrimitives(
+              `fields game_id, value; 
+               limit ${POPULAR_GAMES_LIMIT}; 
+               where popularity_type = 3; 
+               sort value desc;`
+            );
+            popular_games.data.forEach(item => {
+              popularityMap.set(item.game_id, item.value);
+            });
+            return popular_games.data.map(g => g.game_id);
+          },
+          async () => {
+            const games = await igdbApi.getGames(
+              `fields id, total_rating; 
+               sort total_rating desc; 
+               limit ${POPULAR_GAMES_LIMIT};`
+            );
+            games.data.forEach(item => {
+              popularityMap.set(item.id, item.total_rating || 0);
+            });
+            return games.data.map(g => g.id);
+          }
+        );
+    
+        // Fetch game details in batches
+        const BATCH_SIZE = 200;
+        const popularGamesBatches = [];
+        
+        for (let i = 0; i < popularGamesIds.length; i += BATCH_SIZE) {
+          const batchIds = popularGamesIds.slice(i, i + BATCH_SIZE);
+          const gamesDetails = await igdbApi.getGames(
+            `fields name, game_modes.name, total_rating, cover.url, id, url; 
+             where id = (${batchIds.join(',')}) & themes != (42); 
+             limit ${BATCH_SIZE};`
+          );
+          popularGamesBatches.push(...gamesDetails.data);
+        }
+    
+        // Process game details
+        const processedGames = popularGamesBatches.map(game => ({
+          id: game.id,
+          name: game.name,
+          game_modes: game.game_modes ? game.game_modes.map(gm => gm.name) : [],
+          cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_1080p') : null,
+          total_rating: game.total_rating || 0,
+          popularity_value: popularityMap.get(game.id) || 0
+        }));
+    
+        // Create a map of game modes to games
+        const gameModeMap = {};
+        gameModesResponse.data.forEach(gameMode => {
+          gameModeMap[gameMode.name] = [];
+        });
+    
+        // Filter games by game mode
+        processedGames.forEach(game => {
+          game.game_modes.forEach(gameModeName => {
+            if (gameModeMap[gameModeName]) {
+              if (!gameModeMap[gameModeName].some(existingGame => existingGame.id === game.id)) {
+                gameModeMap[gameModeName].push(game);
+              }
+            }
+          });
+        });
+    
+        // Convert map to result array
+        const result = Object.entries(gameModeMap).map(([gameModeName, games]) => {
+          const gameMode = gameModesResponse.data.find(gm => gm.name === gameModeName);
+          
+          // Sort games by popularity within each game mode
+          const sortedGames = games.sort((a, b) => b.popularity_value - a.popularity_value);
+          
+          return {
+            id: gameMode ? gameMode.id : null,
+            value: {
+              game_mode: gameModeName,
+              games: sortedGames
+            },
+            status: 'fulfilled'
+          };
+        });
+    
+        // Filter to ensure only game modes with games are returned
+        const filteredResult = result.filter(item => item.value.games.length > 0);
+    
+        // Cache the result
+        gameCache.set('game_modes_games', filteredResult);
+    
+        // Return result
+        res.status(200).json(filteredResult);
+      } catch (error) {
+        console.error('Error fetching game modes:', error);
+        res.status(500).json({ error: 'Error fetching IGDB data' });
+      }
+    },
 };
