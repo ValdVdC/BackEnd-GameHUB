@@ -357,6 +357,40 @@ module.exports = {
               platformMap[platform.id] = platform.name;
           });
 
+          // Processar temas
+          const allThemeIds = gameDetailsBatches.flatMap(game => game.themes || []);
+          const uniqueThemeIds = Array.from(new Set(allThemeIds));
+
+          const themesQuery = `
+              fields name; 
+              where id = (${uniqueThemeIds.join(',')}); 
+              limit ${uniqueThemeIds.length};
+          `;
+
+          const themes = await igdbApi.getThemes(themesQuery);
+
+          const themeMap = {};
+          themes.data.forEach(theme => {
+              themeMap[theme.id] = theme.name;
+          });
+
+          // Processar modos de jogo
+          const allGameModeIds = gameDetailsBatches.flatMap(game => game.game_modes || []);
+          const uniqueGameModeIds = Array.from(new Set(allGameModeIds));
+
+          const gameModesQuery = `
+              fields name; 
+              where id = (${uniqueGameModeIds.join(',')}); 
+              limit ${uniqueGameModeIds.length};
+          `;
+
+          const gameModes = await igdbApi.getGameModes(gameModesQuery);
+
+          const gameModeMap = {};
+          gameModes.data.forEach(gameMode => {
+              gameModeMap[gameMode.id] = gameMode.name;
+          });
+          
           // Processar e enriquecer os detalhes dos jogos
           const processedGames = gameDetailsBatches.map(game => {
               return {
@@ -364,6 +398,8 @@ module.exports = {
                   name: game.name,
                   genres: game.genres ? game.genres.map(g => g.name) : [],
                   platforms: game.platforms ? game.platforms.map(platformId => platformMap[platformId]) : [],
+                  themes: game.themes ? game.themes.map(themeId => themeMap[themeId]) : [],
+                  game_modes: game.game_modes ? game.game_modes.map(game_modesId => gameModeMap[game_modesId]) : [],
                   cover_url: game.cover ? game.cover.url.replace('t_thumb', 't_1080p') : null,
                   total_rating: game.total_rating || 0,
                   popularity_value: popularityMap.get(game.id) || 0
