@@ -72,7 +72,7 @@ module.exports = {
           for (let i = 0; i < orderedIds.length; i += BATCH_SIZE) {
             const batchIds = orderedIds.slice(i, i + BATCH_SIZE);
             const games = await igdbApi.getGames(
-              `fields name, genres, platforms, total_rating, cover, url, themes, game_modes; 
+              `fields name, genres, platforms, total_rating, cover, url, themes, game_modes, game_type, language_supports, player_perspectives; 
                where id = (${batchIds.join(',')}) & themes != (42); 
                limit ${BATCH_SIZE};`
             );
@@ -891,4 +891,4 @@ module.exports = {
         res.status(500).json({ error: 'Error fetching IGDB data' });
       }
     },
-};
+};  

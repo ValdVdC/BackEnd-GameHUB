@@ -1,4 +1,5 @@
 const igdbApi = require('../services/igdbApi');
+const { getTaxonomyCache } = require('../services/taxonomy');
 
 const EnrichmentLevel = {
   BASIC: 'basic',
@@ -18,7 +19,7 @@ async function fetchWithFallback(primaryFetch, fallbackFetch) {
 }
 
 async function processGames(games, includeCovers = true) {
-    // Processamento de capas (código existente)
+    // Processamento de capas permanece o mesmo
     const coverIds = games
         .map(game => game.cover)
         .filter(cover => cover);
@@ -32,80 +33,26 @@ async function processGames(games, includeCovers = true) {
         coverMap[cover.id] = `https://images.igdb.com/igdb/image/upload/t_1080p/${cover.image_id}.jpg`;
     });
 
-    // Processamento de gêneros (código existente)
-    const allGenreIds = games.flatMap(game => game.genres || []);
-    const uniqueGenreIds = Array.from(new Set(allGenreIds));
-
-    const genresQuery = `
-    fields name; 
-    where id = (${uniqueGenreIds.join(',')}); 
-    limit ${uniqueGenreIds.length};
-    `;
-
-    const genres = await igdbApi.getGenres(genresQuery);
-
-    const genreMap = {};
-    genres.data.forEach(genre => {
-        genreMap[genre.id] = genre.name;
-    });
-
-    // Processamento de plataformas (código existente)
-    const allPlatformIds = games.flatMap(game => game.platforms || []);
-    const uniquePlatformIds = Array.from(new Set(allPlatformIds));
-
-    const platformsQuery = `
-        fields name, platform_logo; 
-        where id = (${uniquePlatformIds.join(',')}); 
-        limit ${uniquePlatformIds.length};
-    `;
+    // Obter cache de taxonomias
+    const taxonomyCache = getTaxonomyCache();
     
-    const platforms = await igdbApi.getPlatforms(platformsQuery);
-    
-    const platformMap = {};
-    platforms.data.forEach(platform => {
-        platformMap[platform.id] = platform.name;
-    });
-
-    // Novos processamentos para temas e modos de jogo
-    const allThemeIds = games.flatMap(game => game.themes || []);
-    const uniqueThemeIds = Array.from(new Set(allThemeIds));
-
-    const themesQuery = `
-    fields name; 
-    where id = (${uniqueThemeIds.join(',')}); 
-    limit ${uniqueThemeIds.length};
-    `;
-
-    const themes = await igdbApi.getThemes(themesQuery);
-
-    const themeMap = {};
-    themes.data.forEach(theme => {
-        themeMap[theme.id] = theme.name;
-    });
-
-    const allGameModeIds = games.flatMap(game => game.game_modes || []);
-    const uniqueGameModeIds = Array.from(new Set(allGameModeIds));
-
-    const gameModesQuery = `
-    fields name; 
-    where id = (${uniqueGameModeIds.join(',')}); 
-    limit ${uniqueGameModeIds.length};
-    `;
-
-    const gameModes = await igdbApi.getGameModes(gameModesQuery);
-
-    const gameModeMap = {};
-    gameModes.data.forEach(gameMode => {
-        gameModeMap[gameMode.id] = gameMode.name;
-    });
-
-    // Mapear informações para os jogos
+    // Usar o cache de taxonomias para mapear os dados
     return games.map(game => ({
         ...game,
-        platforms: game.platforms ? game.platforms.map(platformId => platformMap[platformId]) : [],
-        genres: game.genres ? game.genres.map(genreId => genreMap[genreId]) : [],
-        themes: game.themes ? game.themes.map(themeId => themeMap[themeId]) : [],
-        game_modes: game.game_modes ? game.game_modes.map(gameModeId => gameModeMap[gameModeId]) : [],
+        platforms: game.platforms ? game.platforms.map(platformId => 
+            taxonomyCache.platforms[platformId] || `Platform ${platformId}`
+        ) : [],
+        genres: game.genres ? game.genres.map(genreId => 
+            taxonomyCache.genres[genreId] || `Genre ${genreId}`
+        ) : [],
+        themes: game.themes ? game.themes.map(themeId => 
+            taxonomyCache.themes[themeId] || `Theme ${themeId}`
+        ) : [],
+        game_modes: game.game_modes ? game.game_modes.map(gameModeId => 
+            taxonomyCache.gameModes[gameModeId] || `Game Mode ${gameModeId}`
+        ) : [],
+        game_type: taxonomyCache.gameTypes[game.game_type] || 
+            (game.game_type !== undefined ? `Game Type ${game.game_type}` : null),
         cover_url: includeCovers && game.cover ? coverMap[game.cover] : null
     }));
 }

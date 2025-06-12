@@ -16,6 +16,6 @@ app.use(keepAliveMiddleware);
 // Rotas
 app.use('/health', healthRouter);
 app.use('/api/games', require('./routes/games'));
-
+app.use('/api/taxonomy', require('./routes/taxonomy'));
 
 module.exports = app;

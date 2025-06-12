@@ -37,5 +37,6 @@ module.exports = {
   getPlatforms: (query) => apiRequest('platforms', query),
   getPlatformLogos: (query) => apiRequest('platform_logos', query),
   getThemes: (query) => apiRequest('themes', query),
-  getGameModes: (query) => apiRequest('game_modes', query)
+  getGameModes: (query) => apiRequest('game_modes', query),
+  getGameTypes: (query) => apiRequest('game_types', query)
 };
